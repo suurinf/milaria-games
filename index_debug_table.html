@@ -1,0 +1,161 @@
+
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Таблица игр — режим диагностики</title>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;background:#0b0f14;color:#e7edf2}
+  .wrap{max-width:1200px;margin:24px auto;padding:0 16px 40px}
+  h1{margin:8px 0 6px}
+  .debug{background:#0f1723;border:1px solid #1e2632;border-radius:10px;padding:12px;margin:10px 0 20px;color:#cfe4ff}
+  code{color:#8ed0ff}
+  table{width:100%;border-collapse:separate;border-spacing:0}
+  thead th{position:sticky;top:0;background:#0f1723}
+  th,td{padding:10px;border-bottom:1px solid #1e2632;text-align:left;vertical-align:top}
+  .cover img{width:120px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #1e2632;background:#0d131b}
+  .badge{display:inline-block;min-width:40px;text-align:center;border:1px solid #1e2632;border-radius:999px;padding:4px 8px}
+  .hr{height:1px;background:linear-gradient(90deg,transparent,#1e2632,transparent);margin:18px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Таблица игр — режим диагностики</h1>
+  <div id="dbg" class="debug">Загружаю CSV…</div>
+
+  <h3>Раздел 1 — Пройдённые</h3>
+  <div id="tbl1"></div>
+  <div class="hr"></div>
+
+  <h3>Раздел 2 — Брошенные</h3>
+  <div id="tbl2"></div>
+  <div class="hr"></div>
+
+  <h3>Раздел 3 — Рецензии / мнения (или «всё подряд», если секции не распознаны)</h3>
+  <div id="tbl3"></div>
+</div>
+
+<script>
+const CSV_URL = "milariatube_games.csv";
+const norm = s => (s||"").toString().trim().toLowerCase().replace(/\s+/g,' ');
+function guessDelimiter(line){
+  let c=0,s=0,inq=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch === '"'){ if(inq && line[i+1] === '"'){ i++; } else inq=!inq; }
+    else if(!inq && ch === ',') c++;
+    else if(!inq && ch === ';') s++;
+  }
+  return s>c?';':',';
+}
+function parseCSV(text){
+  const raw = text.replace(/^\uFEFF/, '');
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  const delim = guessDelimiter(lines[0]||",");
+  function parseLine(line){
+    const out=[]; let cur="", inq=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch === '"'){ if(inq && line[i+1] === '"'){ cur+='"'; i++; } else inq=!inq; }
+      else if(ch === delim && !inq){ out.push(cur); cur=""; }
+      else{ cur+=ch; }
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  }
+  const header = lines.length?parseLine(lines.shift()):[];
+  const rows = lines.map(parseLine);
+  return {header, rows, delim};
+}
+function pickIndexes(header){
+  const h = header.map(norm);
+  const idx = {section:-1,title:-1,rating:-1,status:-1,opinion:-1,link:-1,cover:-1};
+  const want = {
+    section:["section","раздел"],
+    title:["название игры","название","игра","title","game"],
+    rating:["оценка (из 10)","оценка","рейтинг","score","rating"],
+    status:["статус","status"],
+    opinion:["краткое мнение","мнение","описание","comment","review"],
+    link:["ссылка на рецензию (url)","ссылка на рецензию","ссылка","url","link"],
+    cover:["обложка (url)","обложка","cover","image","img","thumbnail"]
+  };
+  for(let i=0;i<h.length;i++){
+    for(const k of Object.keys(want)){
+      if(idx[k]!==-1) continue;
+      if(want[k].some(w=>h[i]===w || h[i].includes(w))) { idx[k]=i; break; }
+    }
+  }
+  // позиционный фоллбек для 7 колонок
+  if(h.length >= 6){
+    if(idx.section === -1) idx.section = 0;
+    if(idx.title   === -1) idx.title   = 1;
+    if(idx.rating  === -1 && h.length >= 7) idx.rating = 2;
+    if(idx.status  === -1) idx.status  = (idx.rating !== -1 ? 3 : 2);
+    if(idx.opinion === -1) idx.opinion = (idx.rating !== -1 ? 4 : 3);
+    if(idx.link    === -1) idx.link    = (idx.rating !== -1 ? 5 : 4);
+    if(idx.cover   === -1) idx.cover   = (idx.rating !== -1 ? 6 : 5);
+  }
+  return idx;
+}
+function renderTable(mountId, rows){
+  const m = document.getElementById(mountId);
+  if(!rows.length){ m.innerHTML = "<div style='opacity:.7'>— пусто —</div>"; return; }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const tbody = document.createElement("tbody");
+  table.appendChild(thead); table.appendChild(tbody);
+  const trh = document.createElement("tr");
+  ["Обложка","Название игры","Оценка","Статус","Краткое мнение","Ссылка"].forEach(t=>{
+    const th=document.createElement("th"); th.textContent=t; trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  rows.forEach(rec=>{
+    const [_,title,rating,status,opinion,link,cover] = rec;
+    const tr=document.createElement("tr");
+    const tdC=document.createElement("td"); tdC.className="cover"; const img=new Image(); img.src=cover||""; img.alt=""; img.loading="lazy"; img.referrerPolicy="no-referrer"; tdC.appendChild(img); tr.appendChild(tdC);
+    const tdT=document.createElement("td"); tdT.textContent=title||""; tr.appendChild(tdT);
+    const tdR=document.createElement("td"); tdR.innerHTML = "<span class='badge'>"+((rating||"—"))+"</span>"; tr.appendChild(tdR);
+    const tdS=document.createElement("td"); tdS.textContent=status||""; tr.appendChild(tdS);
+    const tdO=document.createElement("td"); tdO.textContent=opinion||""; tr.appendChild(tdO);
+    const tdL=document.createElement("td"); if(link){ const a=document.createElement("a"); a.href=link; a.textContent='Пост'; a.target='_blank'; tdL.appendChild(a);} else tdL.textContent='—'; tr.appendChild(tdL);
+    tbody.appendChild(tr);
+  });
+  m.innerHTML=""; m.appendChild(table);
+}
+async function main(){
+  const dbg=document.getElementById("dbg");
+  try{
+    const res = await fetch(CSV_URL,{cache:"no-store"});
+    const txt = await res.text();
+    const parsed = parseCSV(txt);
+    const idx = pickIndexes(parsed.header);
+
+    dbg.innerHTML = "<b>Отладка</b><br>"
+      + "Разделитель: <code>"+ parsed.delim +"</code><br>"
+      + "Заголовки: <code>"+ parsed.header.join(" | ") +"</code><br>"
+      + "Индексы: <code>"+ JSON.stringify(idx) +"</code>";
+
+    const all = parsed.rows.map(r => [
+      r[idx.section]||"", r[idx.title]||"", r[idx.rating]||"", r[idx.status]||"",
+      r[idx.opinion]||"", r[idx.link]||"", r[idx.cover]||""
+    ]);
+
+    const comp = all.filter(r => (r[0]||"").trim() === "Пройдённые");
+    const drop = all.filter(r => (r[0]||"").trim() === "Брошенные");
+    let rev = all.filter(r => (r[0]||"").trim() === "Рецензии / мнения");
+
+    // Фоллбек
+    if(!comp.length && !drop.length && !rev.length){ rev = all; dbg.innerHTML += "<br><br><b>Фоллбек:</b> секции не распознаны, показываю все записи в разделе 3."; }
+
+    renderTable("tbl1", comp);
+    renderTable("tbl2", drop);
+    renderTable("tbl3", rev);
+  }catch(e){
+    dbg.textContent = "Ошибка: " + e;
+  }
+}
+main();
+</script>
+</body>
+</html>
