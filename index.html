@@ -1,0 +1,245 @@
+
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пройдённые игры Миларии</title>
+<meta name="color-scheme" content="dark">
+<style>
+  :root{ --bg:#0b0f14; --panel:#0f1723; --muted:#9aa7b1; --text:#e7edf2; --accent:#67b8ff; --border:#1e2632; --ok:#18a96b; --bad:#d65757; }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Inter,Roboto,Ubuntu,Arial;background:linear-gradient(180deg,#0b0f14 0%, #0f1520 60%, #0b0f14 100%);color:var(--text)}
+  .wrap{max-width:1200px;margin:32px auto;padding:0 20px 56px}
+  h1{margin:0 0 6px;font-weight:800;letter-spacing:.2px;font-size:clamp(26px,3vw,36px)}
+  .subtitle{color:var(--muted);font-size:14px;margin-bottom:18px}
+  .section{background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0));border:1px solid var(--border);border-radius:14px;padding:14px 14px 6px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+  .section-title{font-size:clamp(18px,2.4vw,22px);font-weight:700;margin:26px 0 10px}
+  .hr{height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);margin:26px 0}
+  table{width:100%;border-collapse:separate;border-spacing:0}
+  thead th{position:sticky;top:0;background:rgba(20,26,36,.85);backdrop-filter:blur(6px)}
+  th,td{padding:12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;font-size:14px;line-height:1.45}
+  tbody tr:hover{background:rgba(255,255,255,.03)}
+  .cover img{width:120px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);background:#0d131b;box-shadow:0 3px 12px rgba(0,0,0,.35)}
+  .game-title{font-weight:700}
+  .status{display:inline-flex;gap:6px;align-items:center;font-weight:600;padding:6px 10px;border-radius:999px;border:1px solid var(--border);background:#111723}
+  .status.ok{color:#a1f0c8;background:rgba(21,163,96,.12);border-color:rgba(21,163,96,.35)}
+  .status.drop{color:#ffb3b3;background:rgba(227,72,72,.10);border-color:rgba(227,72,72,.35)}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-weight:700;padding:6px 10px;border-radius:999px;border:1px solid var(--border);background:#101725;min-width:44px;justify-content:center}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .skeleton{display:block;height:16px;background:#0e1520;border-radius:6px;margin:6px 0;animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{0%{opacity:.6}50%{opacity:1}100%{opacity:.6}}
+  footer{margin-top:22px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Пройдённые игры Миларии</h1>
+    <div class="subtitle">Публичный просмотр (read‑only). Данные подтягиваются из CSV. Колонка «Оценка» сразу после названия игры.</div>
+  </header>
+
+  <section class="section" id="secCompleted" style="display:none">
+    <div class="section-title">Раздел 1 — Пройдённые</div>
+    <div id="tblCompleted"></div>
+  </section>
+
+  <div class="hr"></div>
+
+  <section class="section" id="secDropped" style="display:none">
+    <div class="section-title">Раздел 2 — Брошенные</div>
+    <div id="tblDropped"></div>
+  </section>
+
+  <div class="hr"></div>
+
+  <section class="section" id="secReviews" style="display:none">
+    <div class="section-title">Раздел 3 — Рецензии / мнения</div>
+    <div id="tblReviews"></div>
+  </section>
+
+  <footer>
+    Источник: публичный канал <a href="https://t.me/milariatube" target="_blank">@milariatube</a>. Изображения — внешние CDN (Steam/Wikipedia).
+  </footer>
+</div>
+
+<script>
+// === CSV рядом с HTML ===
+const CSV_URL = "milariatube_games.csv";
+
+// --- Утилиты ---
+const norm = s => (s||"").toString().trim().toLowerCase().replace(/\s+/g,' ');
+
+// Определяем разделитель первой строки (',' или ';')
+function guessDelimiter(line){
+  let c=0,s=0,inq=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch === '"'){ if(inq && line[i+1] === '"'){ i++; } else inq=!inq; }
+    else if(!inq && ch === ',') c++;
+    else if(!inq && ch === ';') s++;
+  }
+  return s>c?';':',';
+}
+
+// CSV парсер (поддерживает кавычки и дубль-кавычки)
+function parseCSV(text){
+  const raw = text.replace(/^\\uFEFF/, '');
+  const lines = raw.split(/\\r?\\n/).filter(Boolean);
+  if(!lines.length) return {header:[], rows:[], delim:','};
+  const delim = guessDelimiter(lines[0]);
+  function parseLine(line){
+    const out=[]; let cur="", inq=false;
+    for(let i=0;i<line.length;i++){
+      const ch = line[i];
+      if(ch === '"'){ if(inq && line[i+1] === '"'){ cur+='"'; i++; } else inq=!inq; }
+      else if(ch === delim && !inq){ out.push(cur); cur=""; }
+      else{ cur+=ch; }
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  }
+  const header = parseLine(lines.shift());
+  const rows = lines.map(parseLine);
+  return {header, rows, delim};
+}
+
+// Находим индексы ключевых колонок
+function pickIndexes(header){
+  const h = header.map(norm);
+  const idx = {section:-1,title:-1,rating:-1,status:-1,opinion:-1,link:-1,cover:-1};
+  const want = {
+    section:["section","раздел"],
+    title:["название игры","название","игра","title","game"],
+    rating:["оценка (из 10)","оценка","рейтинг","score","rating"],
+    status:["статус","status"],
+    opinion:["краткое мнение","мнение","описание","comment","review"],
+    link:["ссылка на рецензию (url)","ссылка на рецензию","ссылка","url","link"],
+    cover:["обложка (url)","обложка","cover","image","img","thumbnail"]
+  };
+  for(let i=0;i<h.length;i++){
+    for(const key of Object.keys(want)){
+      if(idx[key]!==-1) continue;
+      if(want[key].some(w => h[i]===w || h[i].includes(w))) { idx[key]=i; break; }
+    }
+  }
+  // Позиционный фоллбек для 7-ми колонок (как в твоём CSV)
+  if(h.length >= 6){
+    if(idx.section === -1) idx.section = 0;
+    if(idx.title   === -1) idx.title   = 1;
+    if(idx.rating  === -1 && h.length >= 7) idx.rating = 2;
+    if(idx.status  === -1) idx.status  = (idx.rating !== -1 ? 3 : 2);
+    if(idx.opinion === -1) idx.opinion = (idx.rating !== -1 ? 4 : 3);
+    if(idx.link    === -1) idx.link    = (idx.rating !== -1 ? 5 : 4);
+    if(idx.cover   === -1) idx.cover   = (idx.rating !== -1 ? 6 : 5);
+  }
+  return idx;
+}
+
+// Рендерим таблицу
+function renderTable(mountId, rows){
+  const mount = document.getElementById(mountId);
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const tbody = document.createElement("tbody");
+  table.appendChild(thead); table.appendChild(tbody);
+
+  const trh = document.createElement("tr");
+  ["Обложка","Название игры","Оценка","Статус","Краткое мнение","Ссылка на рецензию"].forEach(txt=>{
+    const th = document.createElement("th"); th.textContent = txt; trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+
+  rows.forEach(rec=>{
+    const [section,title,rating,status,opinion,link,cover] = rec;
+    const tr = document.createElement("tr");
+
+    const tdCover = document.createElement("td");
+    tdCover.className="cover";
+    const img = document.createElement("img");
+    img.alt="cover"; img.loading="lazy"; img.referrerPolicy="no-referrer";
+    img.src = cover || "";
+    tdCover.appendChild(img);
+    tr.appendChild(tdCover);
+
+    const tdTitle = document.createElement("td");
+    tdTitle.className="game-title"; tdTitle.textContent = title || "";
+    tr.appendChild(tdTitle);
+
+    const tdRating = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = (rating && rating.toString().trim()) ? rating : "—";
+    tdRating.appendChild(badge);
+    tr.appendChild(tdRating);
+
+    const tdStatus = document.createElement("td");
+    const span = document.createElement("span");
+    span.className = "status " + (status==="Пройдена"?"ok":(status==="Брошена"?"drop":""));
+    span.textContent = status || "—";
+    tdStatus.appendChild(span);
+    tr.appendChild(tdStatus);
+
+    const tdOpinion = document.createElement("td");
+    tdOpinion.textContent = opinion || "";
+    tr.appendChild(tdOpinion);
+
+    const tdLink = document.createElement("td");
+    if(link){
+      const a = document.createElement("a"); a.href = link; a.target="_blank"; a.rel="noopener"; a.textContent = "Пост в Telegram";
+      tdLink.appendChild(a);
+    } else { tdLink.textContent = "—"; }
+    tr.appendChild(tdLink);
+
+    tbody.appendChild(tr);
+  });
+
+  mount.innerHTML = "";
+  mount.appendChild(table);
+}
+
+// Прелоад-скелетон
+function setSkeleton(id){
+  const m = document.getElementById(id);
+  m.innerHTML = '<span class="skeleton" style="width:50%"></span>'
+              + '<span class="skeleton" style="width:70%"></span>'
+              + '<span class="skeleton" style="width:40%"></span>';
+}
+
+// Инициализация
+async function init(){
+  ["tblCompleted","tblDropped","tblReviews"].forEach(setSkeleton);
+
+  try{
+    const res = await fetch(CSV_URL, {cache:"no-store"});
+    const text = await res.text();
+    const {header, rows} = parseCSV(text);
+    const idx = pickIndexes(header);
+
+    // Собираем записи
+    const completed=[], dropped=[], reviews=[];
+    rows.forEach(r=>{
+      const rec = [
+        r[idx.section]||"", r[idx.title]||"", r[idx.rating]||"", r[idx.status]||"",
+        r[idx.opinion]||"", r[idx.link]||"", r[idx.cover]||""
+      ];
+      const sec = (r[idx.section]||"").toString().trim();
+      if(sec==="Пройдённые") completed.push(rec);
+      else if(sec==="Брошенные") dropped.push(rec);
+      else reviews.push(rec);
+    });
+
+    // Рендерим (секции показываются только если в них есть записи)
+    if(completed.length){ renderTable("tblCompleted", completed); document.getElementById("secCompleted").style.display="block"; }
+    if(dropped.length){ renderTable("tblDropped", dropped); document.getElementById("secDropped").style.display="block"; }
+    if(reviews.length){ renderTable("tblReviews", reviews); document.getElementById("secReviews").style.display="block"; }
+  }catch(e){
+    document.getElementById("tblCompleted").innerHTML = "<div style='opacity:.75'>Не удалось загрузить CSV: "+e+"</div>";
+  }
+}
+init();
+</script>
+</body>
+</html>
