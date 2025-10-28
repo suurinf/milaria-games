@@ -1,0 +1,72 @@
+
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEBUG — CSV parser</title>
+<style>
+  body{margin:0;font-family:ui-monospace,Consolas,Menlo,Monaco,monospace;background:#0b0f14;color:#e7edf2}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 16px 40px}
+  pre{white-space:pre-wrap;background:#0f1723;border:1px solid #1e2632;border-radius:10px;padding:12px}
+  code{color:#bde0ff}
+  h1{margin:6px 0 12px}
+  .ok{color:#9ef0b0}
+  .bad{color:#ffb3b3}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>DEBUG — CSV parser</h1>
+<p>Показываю, как именно парсер видит строки файла <code>milariatube_games.csv</code>.</p>
+<pre id="out">Загрузка…</pre>
+</div>
+
+<script>
+const URL_CSV = "milariatube_games.csv";
+
+// Разделение по ЛЮБОМУ переносу
+function splitLines(raw){
+  return raw.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/);
+}
+
+// Сырые коды символов вокруг первых разрывов (для диагностики)
+function showCodes(sample){
+  const arr = [];
+  for(let i=0;i<sample.length;i++){
+    const ch = sample[i];
+    const code = ch.charCodeAt(0).toString(16).padStart(4,'0');
+    arr.push(ch==='\\n'?'\\n':(ch==='\\r'?'\\r':`\\u${code}`));
+  }
+  return arr.join(' ');
+}
+
+(async () => {
+  const out = document.getElementById('out');
+  try{
+    const res = await fetch(URL_CSV,{cache:"no-store"});
+    const text = await res.text();
+    const rawLen = text.length;
+
+    const first400 = text.slice(0,400);
+    const lines = splitLines(text).filter(l => l.length>0);
+    const head = lines[0] || "";
+    const afterHead = lines.slice(1, 6);
+
+    let report = "";
+    report += "Длина исходного текста: " + rawLen + "\\n\\n";
+    report += "Первые 400 символов (видимые):\\n" + first400.replace(/</g,'&lt;') + "\\n\\n";
+    report += "Коды символов первых 120 символов:\\n" + showCodes(text.slice(0,120)) + "\\n\\n";
+    report += "Кол-во строк после split: " + lines.length + "\\n";
+    report += "Заголовок: " + head + "\\n\\n";
+    report += "Первые 5 строк после заголовка:\\n";
+    afterHead.forEach((l,i)=>{ report += (i+1)+") " + l + "\\n"; });
+
+    out.textContent = report;
+  }catch(e){
+    out.textContent = "Ошибка: " + e;
+  }
+})();
+</script>
+</body>
+</html>
