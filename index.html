@@ -30,7 +30,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Игры Миларии — единый список</h1>
+    <h1>Пройденые Игры Миларии</h1>
     <div class="subtitle"></div>
   </header>
 
@@ -161,7 +161,7 @@ function renderTable(mountId, rows){
 
     const tdLink = document.createElement("td");
     if(link){
-      const a = document.createElement("a"); a.href = link; a.target="_blank"; a.rel="noopener"; a.textContent = "Пост";
+      const a = document.createElement("a"); a.href = link; a.target="_blank"; a.rel="noopener"; a.textContent = "Пост с рецензией";
       tdLink.appendChild(a);
     } else { tdLink.textContent = "—"; }
     tr.appendChild(tdLink);
